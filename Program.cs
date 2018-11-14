@@ -6,28 +6,30 @@ using System.Threading.Tasks;
 using System.Linq;
 
 using Newtonsoft.Json;
+using Newtonsoft.Json.Converters;
+using Newtonsoft.Json.Serialization;
+using System.Numerics;
 
 namespace PillPackEx
 {
-    internal class medication  
+    public  class medication  
     {  
-        internal string id {get; set;}
-        internal string ndc {get; set;}
-        internal string rxcui {get; set;}
-        internal string description {get; set;}
-        internal bool   generic {get; set;}
-        internal bool active {get; set;}
-        internal DateTime created_at {get; set;}
-        internal DateTime updated_at {get; set;}
+        public  string id {get; set;}
+        public  string ndc {get; set;}
+        public  string rxcui {get; set;}
+        public  string description {get; set;}
+        public  bool   generic {get; set;}
+        public  bool active {get; set;}
+        public DateTime created_at {get; set;}
+        public DateTime updated_at {get; set;}
     }
 
-    internal class prescription 
+    public  class prescription 
     {  
-        [JsonConverter(typeof(IdConverter))]
-        internal decimal id {get; set;}
-        internal string medication_id {get; set;}
-        internal DateTime created_at {get; set;}
-        internal DateTime updated_at {get; set;}
+        public BigInteger id {get; set;}
+        public BigInteger medication_id {get; set;}
+        public  DateTime created_at {get; set;}
+        public  DateTime updated_at {get; set;}
     }
 
     internal class prescription_updates
@@ -35,20 +37,20 @@ namespace PillPackEx
         internal string prescription_id {get; set;}
         internal string medication_id {get; set;}        
     }
-    internal class IdConverter : JsonConverter<decimal>
-    {
-        public override void WriteJson(JsonWriter writer, decimal value, JsonSerializer serializer)
-        {
-            writer.WriteValue(value.ToString());
-        }
+//     internal class IdConverter : JsonConverter<decimal>
+//     {
+//         public override void WriteJson(JsonWriter writer, decimal value, JsonSerializer serializer)
+//         {
+//             writer.WriteValue(value.ToString());
+//         }
 
-        public override decimal ReadJson(JsonReader reader, Type objectType, decimal existingValue, bool hasExistingValue, JsonSerializer serializer)
-        {
-            string s = (string)reader.Value;
+//         public override decimal ReadJson(JsonReader reader, Type objectType, decimal existingValue, bool hasExistingValue, JsonSerializer serializer)
+//         {
+//             string s = (string)reader.Value;
 
-            return new decimal();
-        }
-}
+//             return new decimal();
+//         }
+// }
 
     internal enum GenericStatus
     {
@@ -87,11 +89,11 @@ namespace PillPackEx
                 var ScriptsToUpdate = new List<prescription_updates>();
                 foreach (prescription p in scripts)
                 {
-                    var genericStatus = await GetGenericStatus(medsDict, p.medication_id);
-                    if(genericStatus.Item1 == GenericStatus.GenericEquivalentAvailable)
-                    {
-                        //ScriptsToUpdate.Add(new prescription_updates( ){prescription_id = p.id, medication_id = genericStatus.Item2});
-                    }
+                    //var genericStatus = await GetGenericStatus(medsDict, p.medication_id);
+                    // if(genericStatus.Item1 == GenericStatus.GenericEquivalentAvailable)
+                    // {
+                    //     //ScriptsToUpdate.Add(new prescription_updates( ){prescription_id = p.id, medication_id = genericStatus.Item2});
+                    // }
 
                 }
                 return JsonConvert.SerializeObject(ScriptsToUpdate);
@@ -112,19 +114,66 @@ namespace PillPackEx
         }
         internal static async Task<List<prescription>> GetPrescriptions()
         {
+                List<string> errors = new List<string>();
                 httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
                 var url = string.Format($"{baseurl}prescriptions");
                 var response = await httpClient.GetStringAsync(new Uri(url));
-                var scripts = JsonConvert.DeserializeObject<List<prescription>>(response);
+
+                var rs = "["+
+  "{"+
+    "\"id\": \"564aab713032360003280000\","+
+    "\"medication_id\": \"564aab703032360003130000\","+
+    "\"created_at\": \"2015-11-17T04:22:09.752Z\","+
+    "\"updated_at\": \"2015-11-17T04:22:09.752Z\""+
+  "},"+
+  "{"+
+    "\"id\": \"564aab713032360003290000\","+
+    "\"medication_id\": \"564aab713032360003260000\","+
+    "\"created_at\": \"2015-11-17T04:22:09.795Z\","+
+    "\"updated_at\": \"2015-11-17T04:22:09.795Z\""+
+  "},"+
+  "{"+
+    "\"id\": \"564aab7130323600032a0000\","+
+    "\"medication_id\": \"564aab6f30323600030c0000\","+
+    "\"created_at\": \"2015-11-17T04:22:09.832Z\","+
+    "\"updated_at\": \"2015-11-17T04:22:09.832Z\", "+
+  "}]";
+
+                ITraceWriter traceWriter = new MemoryTraceWriter();
+
+                var scripts = JsonConvert.DeserializeObject<List<prescription>>(rs,
+                 new JsonSerializerSettings
+                {
+                TraceWriter = traceWriter,
+                Error = delegate(object sender, ErrorEventArgs args)
+                    {
+                        errors.Add(args.ErrorContext.Error.Message);
+                        args.ErrorContext.Handled = true;
+                    },
+                    Converters = { new IsoDateTimeConverter() }
+                });
+                
+                System.Console.WriteLine(traceWriter);
+
                 System.Console.WriteLine(scripts[0].id);
                 return scripts;                      
         }
         internal static async Task<Dictionary<string,medication>> BuildMedicationDict()
         {
+                List<string> errors = new List<string>();
                 httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
                 var url = string.Format($"{baseurl}medications");
                 var response = await httpClient.GetStringAsync(new Uri(url));
-                var meds = JsonConvert.DeserializeObject<List<medication>>(response);
+                var meds = JsonConvert.DeserializeObject<List<medication>>(response,
+                 new JsonSerializerSettings
+                {
+                Error = delegate(object sender, ErrorEventArgs args)
+                    {
+                        errors.Add(args.ErrorContext.Error.Message);
+                        args.ErrorContext.Handled = true;
+                    },
+                    Converters = { new IsoDateTimeConverter() }
+                });
                 return meds.ToDictionary(x => x.id);       
         }
 
