@@ -10,6 +10,7 @@ using Newtonsoft.Json;
 using Newtonsoft.Json.Converters;
 using Newtonsoft.Json.Serialization;
 using Serilog;
+using System.Net;
 
 namespace PillPackEx
 {
@@ -38,20 +39,6 @@ namespace PillPackEx
         public  string prescription_id {get; set;}
         public  string medication_id {get; set;}        
     }
-//     internal class IdConverter : JsonConverter<decimal>
-//     {
-//         public override void WriteJson(JsonWriter writer, decimal value, JsonSerializer serializer)
-//         {
-//             writer.WriteValue(value.ToString());
-//         }
-
-//         public override decimal ReadJson(JsonReader reader, Type objectType, decimal existingValue, bool hasExistingValue, JsonSerializer serializer)
-//         {
-//             string s = (string)reader.Value;
-
-//             return new decimal();
-//         }
-// }
 
     internal enum GenericEquivalentStatus
     {
@@ -81,13 +68,21 @@ namespace PillPackEx
         {
             httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");      
             try{
-                  var t1 = DoAsyncWork();
+                  var t1 = DoAsyncWorkLiveRequests();
                   t1.Wait();
                   var s1 = t1.Result;
-                  var t2 = DoAsyncWork2();
+
+                  var t2 = DoAsyncWorkUseStaticDataFromMedications();
                   t2.Wait();
                   var s2 = t2.Result;
-                  
+
+                  Console.WriteLine("S1 output");
+                  Console.Write(s1);
+                  Console.WriteLine("S2 output");
+                  Console.Write(s2);
+
+                  Console.WriteLine("");
+                  Console.WriteLine ($"s1 output == s2 output :{s1==s2}");
             }
             catch(Exception e)
             {
@@ -96,64 +91,78 @@ namespace PillPackEx
 
         }
 
-        internal static async Task<string> DoAsyncWork()
+        internal static async Task<string> DoAsyncWorkLiveRequests()
         {
-                              
-                var scripts =  await GetPrescriptions();
-               
-                var medsDict =  await BuildMedicationDict();
-                var genericCache = new Dictionary<string, GenericEquivalentData>();
+            // would be used in the case that updates to generics occur in real time 
+            // that they could change between the time the                
+            var scripts =  await GetPrescriptions();
+            
+            // consider using concurrent dictionary
+            var genericCache = new Dictionary<string, GenericEquivalentData>();
+            var medCache = new ConcurrentDictionary<string, medication>();
 
-                var ScriptsToUpdate = new List<prescription_updates>();
-                int callCount = 0;
-                foreach (prescription p in scripts)
+            var ScriptsToUpdate = new List<prescription_updates>();
+            int callCount = 0;
+            foreach (prescription p in scripts)
+            {
+                medication med = null;
+                string med_id = p.medication_id;
+                if(medCache.ContainsKey(med_id))
+                    {
+                    med = medCache[med_id];
+                    }   
+                else
                 {
-                    if(!medsDict.ContainsKey(p.medication_id))
+                    med  = await  GetMedication(med_id);
+                }
+                
+                if(med == null)
+                {
+                    LogMedicationNotFoundLive( med_id);
+                }
+                else
+                {
+                    medCache.AddOrUpdate(med_id, med, (k, m1 )=>{return m1;});
+                    if( !med.generic )
                     {
-                        Logger.Error($"Medication Id :{p.medication_id } is not a known medication");
-                    }
-                    else
-                    {
-                        var med  = medsDict[p.medication_id];
-                        if( !med.generic )
+
+                        var rxcui = med.rxcui;
+
+                        if(genericCache.ContainsKey(rxcui))
                         {
-
-                            var rxcui = med.rxcui;
-
-                            if(genericCache.ContainsKey(rxcui))
+                            
+                            var genericData = genericCache[rxcui];
+                            if(genericData.status == GenericEquivalentStatus.GenericEquivalentAvailable)
                             {
-                                
-                                var genericData = genericCache[rxcui];
-                                if(genericData.status == GenericEquivalentStatus.GenericEquivalentAvailable)
-                                {
-                                    ScriptsToUpdate.Add(new prescription_updates(){prescription_id = p.id, medication_id = genericCache[rxcui].GenericId});
-                                    LogPrescriptionUpdate(p.id, med.id, genericData.GenericId);
-                                }                                
+                                ScriptsToUpdate.Add(new prescription_updates(){prescription_id = p.id, medication_id = genericCache[rxcui].GenericId});
+                                LogPrescriptionUpdate(p.id, med.id, genericData.GenericId);
+                            }                                
 
+                        }
+                        else 
+                        {
+                            callCount++;
+                            var  s =  await GetGenericStatus(med );
+                            if(!genericCache.ContainsKey(rxcui))
+                            {
+                                genericCache.Add(rxcui, s);
                             }
-                            else 
-                            {
-                                callCount++;
-                                var  s =  await GetGenericStatus(med );
-                                if(!genericCache.ContainsKey(rxcui))
-                                {
-                                    genericCache.Add(rxcui, s);
-                                }
-                                if(s.status == GenericEquivalentStatus.GenericEquivalentAvailable)
-                                {           
-                                    ScriptsToUpdate.Add(new prescription_updates(){prescription_id = p.id, medication_id = s.GenericId});
-                                    LogPrescriptionUpdate(p.id, med.id, s.GenericId);
-                                }
+                            if(s.status == GenericEquivalentStatus.GenericEquivalentAvailable)
+                            {           
+                                ScriptsToUpdate.Add(new prescription_updates(){prescription_id = p.id, medication_id = s.GenericId});
+                                LogPrescriptionUpdate(p.id, med.id, s.GenericId);
                             }
                         }
                     }
-                    
                 }
-                                
-                return JsonConvert.SerializeObject(ScriptsToUpdate, Formatting.Indented);
+            }
+            
+            
+                            
+            return JsonConvert.SerializeObject(ScriptsToUpdate, Formatting.Indented);
         }
 
-        internal static async Task<string> DoAsyncWork2()
+        internal static async Task<string> DoAsyncWorkUseStaticDataFromMedications()
         {
 
             var scripts = await GetPrescriptions();
@@ -166,7 +175,7 @@ namespace PillPackEx
             {
                 if (!medsDict.ContainsKey(p.medication_id))
                 {
-                    Console.WriteLine(String.Format($"MedicationNot Found Id:{p.medication_id}"));
+                    LogMedicationNotFound( p.medication_id);
                 }
                 else
                 {
@@ -198,6 +207,14 @@ namespace PillPackEx
             return JsonConvert.SerializeObject(ScriptsToUpdate, Formatting.Indented);
         }
 
+        private static void LogMedicationNotFound(string med_id)
+        {
+            Logger.Debug(String.Format($"Medication Not Found Id:{med_id}"));
+        }
+        private static void LogMedicationNotFoundLive(string med_id)
+        {
+            Logger.Debug(String.Format($"LiveMedication Not Found Id:{med_id}"));
+        }
         private static void LogPrescriptionUpdate( string script_id, string med_id, string gen_id)
         {
             Logger.Debug($"Adding Script Update script_id:{script_id}; med_id:{med_id}; gen_id:{gen_id}");
@@ -229,74 +246,77 @@ namespace PillPackEx
 
         internal static async Task<List<medication>> GetEquvailentMedications(string rxcui)
         {
-                string logPrefix ="GetEquvilentMedications:"; 
-                if(string.IsNullOrEmpty(rxcui))
-                {
-                    throw new Exception("Parameter rxcui must be have a valid value");
-                }
-                //httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
-                var url = string.Format($"{baseurl}medications?rxcui={rxcui}");
-                
-                Logger.Debug( $"{logPrefix} url:{url}");
-                using (var client = new HttpClient())
-                {
-                    var response = await httpClient.GetAsync(new Uri(url));
-                
-                    Logger.Debug( $"{logPrefix} response code: {response.StatusCode}" );
-
-                    var r = await response.Content.ReadAsStringAsync();
-                    var meds = JsonConvert.DeserializeObject<List<medication>>(r);
-                    return meds;
-                
-                }
-                       
+            string logPrefix ="GetEquvilentMedications:"; 
+            if(string.IsNullOrEmpty(rxcui))
+            {
+                throw new Exception("Parameter rxcui must be have a valid value");
+            }
+            //httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
+            var url = string.Format($"{baseurl}medications?rxcui={rxcui}");
+            
+            Logger.Debug( $"{logPrefix} url:{url}");
+            var response = await httpClient.GetAsync(new Uri(url));
+            
+            if(response.StatusCode != HttpStatusCode.OK)
+            {
+                    Logger.Debug( $"{logPrefix} response url:{url}; code: {response.StatusCode}" );
+                return null;
+            }
+            var r = await response.Content.ReadAsStringAsync();
+            var meds = JsonConvert.DeserializeObject<List<medication>>(r);
+            return meds;                       
         }
         internal static async Task<List<prescription>> GetPrescriptions()
         {
-                List<string> errors = new List<string>();
-                var url = string.Format($"{baseurl}prescriptions");
-                var response = await httpClient.GetStringAsync(new Uri(url));
-                var scripts = JsonConvert.DeserializeObject<List<prescription>>(response);  
-                return scripts;                      
+            List<string> errors = new List<string>();
+            var url = string.Format($"{baseurl}prescriptions");
+            var response = await httpClient.GetAsync(new Uri(url));
+            if(response.StatusCode != HttpStatusCode.OK)
+            {
+                Logger.Debug( $"GetPrescriptions Failed http Request response url:{url}; code: {response.StatusCode}" );
+                return null;        
+            }
+            var content = await response.Content.ReadAsStringAsync();
+            var scripts = JsonConvert.DeserializeObject<List<prescription>>(content);  
+            return scripts;                      
+        }
+
+        internal static async Task<medication> GetMedication(string id)
+        {
+            string logPrefix ="GetMedication:";     
+            List<string> errors = new List<string>();
+            var url = string.Format($"{baseurl}medications/{id}");
+            
+            Logger.Debug( $"{logPrefix} url:{url}");
+            
+            var response = await httpClient.GetAsync(new Uri(url));
+        
+            if(response.StatusCode != HttpStatusCode.OK)
+            {
+                 Logger.Debug( $"{logPrefix} response url:{url}; code: {response.StatusCode}" );
+                return null;
+            }
+
+            var r = await response.Content.ReadAsStringAsync();
+            var medication = JsonConvert.DeserializeObject<medication>(r);
+            
+            return medication;                      
         }
         internal static async Task<Dictionary<string,medication>> BuildMedicationDict()
         {
-                List<string> errors = new List<string>();
-                //httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
-                var url = string.Format($"{baseurl}medications");
-                var response = await httpClient.GetStringAsync(new Uri(url));
-                var meds = JsonConvert.DeserializeObject<List<medication>>(response);
-                return meds.ToDictionary(x => x.id);       
+            List<string> errors = new List<string>();
+            //httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");
+            var url = string.Format($"{baseurl}medications");
+            var response = await httpClient.GetAsync(new Uri(url));
+            if(response.StatusCode != HttpStatusCode.OK)
+            {
+                Logger.Debug( $"BuildMedicationDict Failed http Request url:{url} response code: {response.StatusCode}" );        
+            }
+            var content = await response.Content.ReadAsStringAsync();
+            var meds = JsonConvert.DeserializeObject<List<medication>>(content);
+            return meds.ToDictionary(x => x.id);           
         }
 
-        // internal static async Task<bool> GetStatusAndAddToUpdate (prescription prescription,  List<prescription_updates> updateList, Dictionary<string, medication> meds, int count)
-        // {
-        //     try
-        //     {
-        //         var s = await GetGenericStatus(meds, prescription.medication_id);
-        //         if(s.status == GenericEquivalentStatus.GenericEquivalentAvailable)
-        //         {
-        //             updateList.Add(new prescription_updates(){prescription_id=prescription.id, medication_id = s.GenericId});
-        //             return true;
-        //         }
-        //     }
-        //     catch
-        //     {
-        //         if(count<5)
-        //         {
-        //             System.Console.WriteLine("Retrying");
-        //             ++count;
-        //             return await GetStatusAndAddToUpdate(prescription, updateList, meds, count);
-
-        //         }
-        //         System.Console.WriteLine("Out of Retries Unable to upate Prescription:"+ prescription.id );
-
-        //         return false;
-
-        //     }
-        //     return false;
-
-        // }
         
         internal static async Task<GenericEquivalentData> GetGenericStatus (medication med)
         {
@@ -320,7 +340,7 @@ namespace PillPackEx
             }
             catch(Exception e)
             {
-                // consider using a different status to indicate error
+                Logger.Debug(e, "Error Attempting to get equivalent generic");
                 return new GenericEquivalentData(){status =  GenericEquivalentStatus.NoAvailableEquivalent, GenericId= med.id};
             }
             
