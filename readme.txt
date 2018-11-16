@@ -1,4 +1,4 @@
-Readme PillPack At home test for Thomas Leake
+Readme coding exercise
 
 To build this program  download and install the .netcore SDK from this link
 
@@ -14,8 +14,9 @@ Type
 
 To run on MacOs ElCapitan Docker is required.
 To run image us the following command
-
 "docker run dripdrip/ppx:initial"
+
+Note: I don't have any apple hardware so I have not tested running this on a MacOs, I did test on play-with-docker
 
 
 
