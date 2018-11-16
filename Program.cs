@@ -29,17 +29,19 @@ namespace PillPackEx
         {
             httpClient.DefaultRequestHeaders.Add("User-Agent", "Mozilla/5.0 (Windows NT 6.1; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/58.0.3029.110 Safari/537.36");      
             try{
-                 // implementation using chatty live data                
-                   var t1 = DoAsyncWorkLiveRequests();
-                   t1.Wait();
-                   var s1 = t1.Result;
-                   Console.Write(s1);
+                // Two implemenations provided one uses all the API features but is more chatty
+                // the other loads all data from the medications processes it and builds data tables to process
+                // implementation using chatty live data                
+                var t1 = DoAsyncWorkLiveRequests();
+                t1.Wait();
+                var s1 = t1.Result;
+                Console.Write(s1);
 
-                  //implementation using static data downloaded all at once
-                  //var t2 = DoAsyncWorkUseStaticDataFromMedications();
-                  //t2.Wait();
-                  //var s2 = t2.Result;
-                  //Console.Write(s2);
+                //implementation using  data downloaded all at once
+                //var t2 = DoAsyncWorkUseStaticDataFromMedications();
+                //t2.Wait();
+                //var s2 = t2.Result;
+                //Console.Write(s2);
             }
             catch(Exception e)
             {
