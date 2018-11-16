@@ -310,44 +310,4 @@ namespace PillPackEx
             return meds.ToDictionary(x => x.id);           
         }
     }
-    public  class medication  
-    {  
-        public  string id {get; set;}
-        public  string ndc {get; set;}
-        public  string rxcui {get; set;}
-        public  string description {get; set;}
-        public  bool   generic {get; set;}
-        public  bool active {get; set;}
-        public DateTime created_at {get; set;}
-        public DateTime updated_at {get; set;}
-    }
-
-    public  class prescription 
-    {  
-        public string id {get; set;}
-        public string medication_id {get; set;}
-        public  DateTime created_at {get; set;}
-        public  DateTime updated_at {get; set;}
-    }
-
-    public  class prescription_updates
-    {
-        public  string prescription_id {get; set;}
-        public  string medication_id {get; set;}        
-    }
-
-    internal enum GenericEquivalentStatus
-    {
-        IsGeneric,
-        GenericEquivalentAvailable,
-        NoAvailableEquivalent
-    }
-
-    internal struct GenericEquivalentData
-    {
-        internal GenericEquivalentStatus status{get; set;}
-        internal string GenericId  {get; set;}
-        
-    }
-
 }
